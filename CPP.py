@@ -160,7 +160,7 @@ def determine_age_eligibility(date_of_birth, client):
     return completion.choices[0].message.content
 
 
-def calculate_payment(date_of_birth, pension_start, start_date, contribution_amount, client):
+def calculate_payment(name, date_of_birth, pension_start, start_date, contribution_amount, client):
     # Determine start date of payment
     date_of_birth = datetime.strptime(date_of_birth, '%Y-%m-%d')
     date_turning_60 = date_of_birth.replace(year=date_of_birth.year + 60)
@@ -190,6 +190,7 @@ def calculate_payment(date_of_birth, pension_start, start_date, contribution_amo
 
     # Construct the user prompt
     user_prompt = f'''
+    The applicant's name is {name}.
     The applicant was born on {date_of_birth} (YYYY-MM-DD).
     The applicant intends to start receiving CPP pension benefits on {start_date} (YYYY-MM).
     The applicant should start receiving benefits between the age of 60 and 70.
@@ -258,7 +259,7 @@ if __name__ == '__main__':
     # Display uploaded PDF
     if 'has_uploaded_pdf' in st.session_state:
         st.divider()
-        st.subheader('Validate AI extracted inputs')
+        st.subheader('Verify AI extracted information')
         for idx in PAGES:
             if 'toggle_confirm_accuracy' not in st.session_state:
                 expanded = True
@@ -273,7 +274,7 @@ if __name__ == '__main__':
                         st.text_input(k, value=v, key=convert_id_to_key(k))
 
         st.toggle(
-            'I confirm the accuracy of extracted inputs',
+            'I confirm the accuracy of the extracted information',
             key='toggle_confirm_accuracy',
             on_change=toggle_inputs
         )
@@ -340,12 +341,13 @@ if __name__ == '__main__':
     if 'toggle_confirm_eligibility' in st.session_state and st.session_state['toggle_confirm_eligibility']:
         if 'cpp_eligible' in st.session_state and st.session_state['cpp_eligible']:
             st.divider()
-            st.subheader('Confirm AI calculated payment')
+            st.subheader('Check AI calculated payment')
 
             # Calculate payment
             if 'payment_calculation' not in st.session_state:
                 with st.spinner('Calculating payment ...'):
                     st.session_state['payment_calculation'] = calculate_payment(
+                        f"{st.session_state['input_first_name']} {st.session_state['input_last_name']}",
                         st.session_state['input_date_of_birth'],
                         st.session_state['input_pension_start'],
                         st.session_state['input_as_of_date'],
@@ -362,10 +364,11 @@ if __name__ == '__main__':
 
             with col2:
                 with st.container(border=True):
+                    prep = 'before' if st.session_state['payment_calculation']['delta_months'] < 0 else 'after'
                     st.metric(
                         'Pension start date',
                         st.session_state['payment_calculation']['pension_start_date'].strftime('%Y-%m-%d'),
-                        f"{st.session_state['payment_calculation']['delta_months']} mo from 65th birthday"
+                        f"{st.session_state['payment_calculation']['delta_months']} mo {prep} 65th birthday"
                     )
 
             with col3:
