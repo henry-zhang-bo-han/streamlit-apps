@@ -1,13 +1,10 @@
 import base64
 import json
-import os
 from io import BytesIO
 
 import streamlit as st
 from openai import OpenAI
 from pdf2image import convert_from_bytes
-
-MIN_PAGE_NO, MAX_PAGE_NO = 0, 2
 
 IMG2JSON_SYSTEM_PROMPT = '''
 You are an expert document image analyzer. Given an image of a document page, you will answer specific user questions
@@ -42,8 +39,21 @@ FIELDS_LIST = [
     {'ID': 'Separated or Divorced', 'type': 'str', 'options': ['Yes', 'No'], 'page': 1},
     {'ID': 'Current Marital Status', 'type': 'str',
      'options': ['Single', 'Married', 'Separated', 'Divorced', 'Common-law', 'Surviving spouse or common-law partner'],
-     'page': 1}
+     'page': 1},
+    {'ID': 'Pension Start', 'type': 'str', 'options': ['As soon as I qualify', 'As of'], 'page': 5},
+    {'ID': 'As of Date', 'type': 'str', 'format': 'YYYY-MM', 'page': 5},
+    {'ID': 'Deduct Federal Income Tax', 'type': 'str', 'options': ['Yes', 'No'], 'page': 5},
+    {'ID': 'Federal Income Tax ($)', 'type': 'int', 'page': 5},
+    {'ID': 'Federal Income Tax (%)', 'type': 'int', 'page': 5},
+    {'ID': 'Applicant Signature', 'type': 'str', 'page': 6},
+    {'ID': 'First Name of Witness', 'type': 'str', 'page': 6},
+    {'ID': 'Last Name of Witness', 'type': 'str', 'page': 6},
+    {'ID': 'Telephone of Witness', 'type': 'int', 'page': 6},
+    {'ID': 'Address of Witness', 'type': 'str', 'page': 6},
+    {'ID': 'Signature of Witness', 'type': 'str', 'page': 6}
 ]
+
+PAGES = set([field['page'] for field in FIELDS_LIST])
 
 
 def convert_pdf_to_images(pdf):
@@ -103,12 +113,12 @@ def process_uploaded_pdf():
             screenshots = convert_pdf_to_images(uploaded_file.getvalue())
 
             # Extract JSON from images
-            st.session_state['extracted_values'] = []
-            for i in range(MIN_PAGE_NO, MAX_PAGE_NO):
+            st.session_state['extracted_values'] = {}
+            for i in PAGES:
                 status.update(label=f'Extracting answers from page {i + 1} ...')
                 user_prompt = construct_img2json_user_prompt(FIELDS_LIST, i)
                 json_data = extract_json_from_image(openai_client, screenshots[i], user_prompt)
-                st.session_state['extracted_values'].append(json_data)
+                st.session_state['extracted_values'][i] = json_data
 
             # Finalize processing
             status.update(label='PDF successfully processed ...')
@@ -139,8 +149,8 @@ if __name__ == '__main__':
     # Display uploaded PDF
     if 'has_uploaded_pdf' in st.session_state:
         st.subheader('Validate AI extracted inputs')
-        for idx in range(MIN_PAGE_NO, MAX_PAGE_NO):
-            with st.expander(f'Inputs extracted from page {idx + 1}', expanded=True):
+        for idx in PAGES:
+            with st.expander(f'Inputs extracted from page {idx + 1}'):
                 for k, v in st.session_state['extracted_values'][idx].items():
                     st.text_input(k, value=v, key=convert_id_to_key(k))
 
