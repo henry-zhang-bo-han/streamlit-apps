@@ -206,6 +206,7 @@ def calculate_payment(date_of_birth, pension_start, start_date, contribution_amo
     ---
     Write a clear paragraph explaining the rationale behind the calculation. Retain key figures.
     Do not have more than 2 decimal places for any number.
+    Below the rationale, write a Python code block that performs the above calculations. 
     '''
 
     # Use OpenAI to make calculations
