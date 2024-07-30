@@ -1,5 +1,7 @@
 import base64
 import json
+import time
+from datetime import datetime
 from io import BytesIO
 
 import streamlit as st
@@ -54,6 +56,7 @@ FIELDS_LIST = [
 ]
 
 PAGES = set([field['page'] for field in FIELDS_LIST])
+FIELD_OPTIONS = {field['ID']: field['options'] for field in FIELDS_LIST if 'options' in field}
 
 
 def convert_pdf_to_images(pdf):
@@ -109,7 +112,7 @@ def process_uploaded_pdf():
             status.update(label='Uploading PDF ...')
 
             # Convert PDF to images
-            status.update(label='Converting PDF to images ...')
+            status.update(label='Scanning PDF pages ...')
             screenshots = convert_pdf_to_images(uploaded_file.getvalue())
 
             # Extract JSON from images
@@ -126,7 +129,26 @@ def process_uploaded_pdf():
     else:
         st.session_state.pop('has_uploaded_pdf', None)
         st.session_state.pop('extracted_values', None)
+        st.session_state.pop('age_eligibility_assessment', None)
+        st.session_state.pop('past_contributions_assessment', None)
+        st.session_state.pop('cpp_eligible', None)
         st.session_state['toggle_confirm_accuracy'] = False
+
+
+def determine_age_eligibility(date_of_birth, client):
+    today = datetime.today().strftime('%Y-%m-%d')
+    user_prompt = f'''
+    The applicant was born on {date_of_birth} (YYYY-MM-DD).
+    Today's date is {today} (YYYY-MM-DD).
+    For the applicant to quality for CPP, they must be at least 60 years old as of today.
+    If the applicant is at least 60 years old, return AGE_REQUIREMENT_MET. Otherwise, return AGE_REQUIREMENT_NOT_MET.
+    In addition, provide the rationale of the assessment in one sentence.
+    '''
+    completion = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[{'role': 'user', 'content': user_prompt}]
+    )
+    return completion.choices[0].message.content
 
 
 if __name__ == '__main__':
@@ -150,13 +172,67 @@ if __name__ == '__main__':
     if 'has_uploaded_pdf' in st.session_state:
         st.subheader('Validate AI extracted inputs')
         for idx in PAGES:
-            with st.expander(f'Inputs extracted from page {idx + 1}'):
+            if 'toggle_confirm_accuracy' not in st.session_state:
+                expanded = True
+            else:
+                expanded = not st.session_state['toggle_confirm_accuracy']
+
+            with st.expander(f'Inputs extracted from page {idx + 1}', expanded=expanded):
                 for k, v in st.session_state['extracted_values'][idx].items():
-                    st.text_input(k, value=v, key=convert_id_to_key(k))
+                    if k in FIELD_OPTIONS:
+                        st.selectbox(k, options=FIELD_OPTIONS[k], key=convert_id_to_key(k))
+                    else:
+                        st.text_input(k, value=v, key=convert_id_to_key(k))
 
         st.toggle('I confirm the accuracy of extracted inputs', key='toggle_confirm_accuracy')
 
     # Display eligibility assessment
     if 'toggle_confirm_accuracy' in st.session_state and st.session_state['toggle_confirm_accuracy']:
         st.subheader('Confirm AI assessed eligibility')
-        st.write('To be implemented ...')
+
+        # Assess age eligibility
+        if 'age_eligibility_assessment' not in st.session_state:
+            with st.spinner('Assessing age eligibility ...'):
+                st.session_state['age_eligibility_assessment'] = determine_age_eligibility(
+                    st.session_state['input_date_of_birth'],
+                    openai_client
+                )
+
+        first_name = st.session_state['input_first_name']
+
+        if age_eligible := 'AGE_REQUIREMENT_MET' in st.session_state['age_eligibility_assessment']:
+            age_eligibility_header = f'✅ {first_name} is 60+ years old'
+        else:
+            age_eligibility_header = f'❌ {first_name} is under 60 years old'
+
+        with st.expander(age_eligibility_header):
+            st.write(st.session_state['age_eligibility_assessment'])
+
+        # Assess past contributions
+        if 'past_contributions_assessment' not in st.session_state:
+            with st.spinner('Assessing past contributions ...'):
+                time.sleep(1)
+                if 'CONTRIBUTIONS' in st.secrets:
+                    st.session_state['past_contributions_assessment'] = float(st.secrets['CONTRIBUTIONS'])
+                else:
+                    st.session_state['past_contributions_assessment'] = 0.0
+
+        contributions = st.session_state['past_contributions_assessment']
+        if contributions > 0:
+            contributions_header = f'✅ {first_name} has made valid CPP contributions'
+            contributions_body = f'Total past contributions: ${contributions:,.2f}'
+        else:
+            contributions_header = f'❌ {first_name} has no past CPP contributions'
+            contributions_body = f'No past contributions made to CPP'
+
+        with st.expander(contributions_header):
+            st.write(contributions_body)
+
+        # Assess overall eligibility
+        if 'cpp_eligible' not in st.session_state:
+            st.session_state['cpp_eligible'] = age_eligible and contributions > 0
+
+        if st.session_state['cpp_eligible']:
+            st.write(f'✅ {first_name} is eligible for CPP benefits')
+        else:
+            st.write(f'❌ {first_name} is not eligible for CPP benefits')
