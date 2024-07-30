@@ -5,10 +5,8 @@ from io import BytesIO
 
 import streamlit as st
 from openai import OpenAI
-from pdf2image import convert_from_path
+from pdf2image import convert_from_bytes
 
-PDF_FOLDER = './data/pdfs'
-IMAGE_FOLDER = './data/images'
 MIN_PAGE_NO, MAX_PAGE_NO = 0, 2
 
 IMG2JSON_SYSTEM_PROMPT = '''
@@ -48,14 +46,8 @@ FIELDS_LIST = [
 ]
 
 
-def convert_pdf_to_images(pdf_name: str):
-    pdf_path = os.path.join(PDF_FOLDER, pdf_name)
-    pdf_id = pdf_name.split('.')[0]
-    new_image_folder_path = os.path.join(IMAGE_FOLDER, pdf_id)
-    os.makedirs(new_image_folder_path, exist_ok=True)
-    images = convert_from_path(pdf_path, fmt='png', thread_count=8)
-    for i, image in enumerate(images):
-        image.save(os.path.join(new_image_folder_path, f'{i}.png'))
+def convert_pdf_to_images(pdf):
+    images = convert_from_bytes(pdf, fmt='png', thread_count=8)
     return images
 
 
@@ -105,12 +97,10 @@ def process_uploaded_pdf():
         with st.status('Processing uploaded PDF...', expanded=False) as status:
             # Save uploaded PDF
             status.update(label='Uploading PDF ...')
-            with open(os.path.join(PDF_FOLDER, uploaded_file.name), 'wb') as f:
-                f.write(uploaded_file.getvalue())
 
             # Convert PDF to images
             status.update(label='Converting PDF to images ...')
-            screenshots = convert_pdf_to_images(uploaded_file.name)
+            screenshots = convert_pdf_to_images(uploaded_file.getvalue())
 
             # Extract JSON from images
             st.session_state['extracted_values'] = []
