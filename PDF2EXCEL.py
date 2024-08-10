@@ -1,9 +1,11 @@
 import base64
 import json
-import streamlit as st
-import pytesseract
 from io import BytesIO
+
+import pytesseract
+import streamlit as st
 from openai import OpenAI
+from openpyxl import Workbook
 from pdf2image import convert_from_bytes
 
 IMG2MD_SYSTEM_PROMPT = '''
@@ -17,7 +19,7 @@ Given the image of a document page, you transcribe all text of the page into Mar
 
 # Output format
 - Transcribe the document word-for-word whenever possible. Do not paraphrase any content nor add clarifying statements.
-- Do not split a single table into multiple tables. However, keep different tables separate.
+- Do not split a single coherent table into multiple tables, unless they are different tables.
 - Do not split content into multiple lines unless ABSOLUTELY NECESSARY.
 - Output only the transcribed content. Do not reply with other content (e.g., here is the content of the document).
 - Only wrap the Markdown tables in markdown code blocks. Do not wrap other content in code blocks.
@@ -103,6 +105,25 @@ def convert_markdown_to_json(client, markdown_content):
     return json.loads(completion.choices[0].message.content)
 
 
+def create_excel_binary_from_json(json_data):
+    wb = Workbook()
+    ws = wb.active
+
+    # Add tables to Excel
+    for table in json_data:
+        ws.append([])
+        ws.append([table['title']])
+        for row in table['body']:
+            ws.append(row)
+
+    # Save workbook to binary stream
+    binary_stream = BytesIO()
+    wb.save(binary_stream)
+    binary_content = binary_stream.getvalue()
+
+    return binary_content
+
+
 def process_uploaded_pdf(client):
     uploaded_file = st.session_state['uploaded_pdf']
 
@@ -116,7 +137,7 @@ def process_uploaded_pdf(client):
             text_extracts = []
             table_extracts = []
             for i, image in enumerate(images):
-                status.update(label=f'Reading tables from page #{i+1} ...')
+                status.update(label=f'Reading tables from page #{i + 1} ...')
 
                 # Convert to string using OCR
                 ocr_string = pytesseract.image_to_string(image)
@@ -127,7 +148,7 @@ def process_uploaded_pdf(client):
 
                 # Use OpenAI to convert Markdown to JSON
                 table_json = convert_markdown_to_json(client, text_from_image)
-                if table_json['tables'] != 'NO_TABLE_PRESENT' and type(table_json['tables']) == list:
+                if table_json['tables'] != 'NO_TABLE_PRESENT' and type(table_json['tables']) is list:
                     table_extracts.extend(table_json['tables'])
 
             status.update(label='PDF processing complete')
@@ -152,6 +173,13 @@ if __name__ == '__main__':
 
     # Show tables
     if 'table_extracts' in st.session_state:
-        for t in st.session_state['table_extracts']:
-            st.subheader(t['title'])
-            st.json(t['body'])
+        st.divider()
+
+        excel_workbook = create_excel_binary_from_json(st.session_state['table_extracts'])
+
+        st.download_button(
+            label='Download Excel Output',
+            data=excel_workbook,
+            file_name='Converted_Tables.xlsx',
+            mime='application/vnd.ms-excel'
+        )
