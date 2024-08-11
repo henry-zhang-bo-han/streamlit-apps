@@ -41,7 +41,6 @@ You are an expert in formatting Markdown tables.
 - You will also be provided with a raw Markdown text transcription of the document page.
 - Your goal is to properly format all the tables in a Markdown format.
 - If there are no tables in the provided content, return NO_TABLE_PRESENT and terminate.
-- You apply the correct unit (e.g., $, %) and magnitude (e.g., thousands, millions) to each cell.
 
 # Output format
 - A single table should not be split into multiple tables, unless they are separate tables.
@@ -50,10 +49,6 @@ You are an expert in formatting Markdown tables.
 - Each Markdown table's row should have the same number of columns (i.e., max of all rows from that table).
 - If a cell spans multiple columns, represent it as a single cell with the appropriate number of dashes.
 - At the end of each table, add a new line with #####END-OF-TABLE#####.
-
-# Unit and magnitude
-- Apply the correct unit (e.g., $, %) and magnitude (e.g., thousands, millions, billions) to each cell.
-- Relevant information might be found in the table heading, description, or body.
 '''
 
 FORMAT_TABLES_USER_PROMPT = '''
