@@ -8,8 +8,6 @@ from openai import OpenAI
 from openpyxl import Workbook
 from pdf2image import convert_from_bytes
 
-PAGE_LIMIT = 10
-
 IMG2MD_SYSTEM_PROMPT = '''
 You are an expert document parser.
 Given the image of a document page, you transcribe all text of the page into Markdown format accurately and clearly.
@@ -74,6 +72,7 @@ You are an expert in converting Markdown tables into well-formatted JSON objects
 - For each table, extract its title.
 - For each table, convert the Markdown table's body into a JSON list of rows.
 - Each row should be a list of cells, each representing the value of a table cell.
+- If a cell contains a number, make that cell an integer or float in the JSON object.
 '''
 
 MD2JSON_USER_PROMPT = '''
@@ -176,7 +175,7 @@ def process_uploaded_pdf(client):
         with st.status('Scanning uploaded PDF pages ...', expanded=True) as status:
             # Convert PDF pages into images
             images = convert_from_bytes(uploaded_file.getvalue(), fmt='png', thread_count=8)
-            images = images[:min(PAGE_LIMIT, len(images))]  # limit pages for cost reasons
+            images = images[:min(st.secrets['PDF_PAGE_LIMIT'], len(images))]  # limit pages for cost reasons
             st.session_state['images'] = images
 
             # Extract table titles from images
@@ -217,7 +216,7 @@ if __name__ == '__main__':
 
     # Upload scanned PDF for processing
     uploaded_pdf = st.file_uploader(
-        f'Upload a PDF (of at most {PAGE_LIMIT} pages) to convert to Excel',
+        f"Upload a PDF (of at most {st.secrets['PDF_PAGE_LIMIT']} pages) to convert to Excel",
         type='pdf',
         on_change=process_uploaded_pdf,
         args=(openai_client,),
