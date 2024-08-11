@@ -49,6 +49,7 @@ You are an expert in formatting Markdown tables.
 - Each Markdown table's row should have the same number of columns (i.e., max of all rows from that table).
 - If a cell spans multiple columns, represent it as a single cell with the appropriate number of dashes.
 - At the end of each table, add a new line with #####END-OF-TABLE#####.
+- Remove the page number and any other content irrelevant to the tables.
 '''
 
 FORMAT_TABLES_USER_PROMPT = '''
@@ -67,6 +68,7 @@ You are an expert in converting Markdown tables into well-formatted JSON objects
 - For each table, extract its title.
 - For each table, convert the Markdown table's body into a JSON list of rows.
 - Each row should be a list of cells, each representing the value of a table cell.
+- For each table row, retain the row header if present. Remove **bold** or any other formatting.
 - If a cell contains a number, make that cell an integer or float in the JSON object.
 '''
 
@@ -144,18 +146,21 @@ def convert_markdown_to_json(client, markdown_content):
 
 def create_excel_binary_from_json(json_data):
     wb = Workbook()
-    ws = wb.active
+    ws_original = wb.active
 
-    # Add tables to Excel
-    for table in json_data:
-        ws.append([table['title']])
-        ws.append([])
-        for row in table['body']:
-            ws.append(row)
-        ws.append([])
-        ws.append([])
+    # Add tables to Excel by page
+    for page in sorted(json_data.keys()):
+        ws = wb.create_sheet(f'Page {page}')
+        for table in json_data[page]:
+            ws.append([table['title']])
+            ws.append([])
+            for row in table['body']:
+                ws.append(row)
+            ws.append([])
+            ws.append([])
 
     # Save workbook to binary stream
+    wb.remove(ws_original)
     binary_stream = BytesIO()
     wb.save(binary_stream)
     binary_content = binary_stream.getvalue()
@@ -176,7 +181,7 @@ def process_uploaded_pdf(client):
             # Extract table titles from images
             text_extracts = []
             formatted_tables = []
-            table_extracts = []
+            table_extracts = {}
             for i, image in enumerate(images):
                 status.write(f'Reading tables from page {i + 1} ...')
 
@@ -194,13 +199,17 @@ def process_uploaded_pdf(client):
                 # Use OpenAI to convert Markdown to JSON
                 if 'NO_TABLE_PRESENT' not in formatted_table:
                     table_json = convert_markdown_to_json(client, formatted_table)
-                    table_extracts.extend(table_json['tables'])
+                    table_extracts[i+1] = table_json['tables']
 
             # Update status and session states
             status.update(label='✅ PDF processing complete', expanded=False)
             st.session_state['text_extracts'] = text_extracts
             st.session_state['formatted_tables'] = formatted_tables
             st.session_state['table_extracts'] = table_extracts
+    else:
+        st.session_state.pop('text_extracts', None)
+        st.session_state.pop('formatted_tables', None)
+        st.session_state.pop('table_extracts', None)
 
 
 if __name__ == '__main__':
@@ -221,10 +230,13 @@ if __name__ == '__main__':
     # Show tables
     if 'table_extracts' in st.session_state:
         st.divider()
-        excel_workbook = create_excel_binary_from_json(st.session_state['table_extracts'])
-        st.download_button(
-            label='Download Excel Output',
-            data=excel_workbook,
-            file_name='Converted_Tables.xlsx',
-            mime='application/vnd.ms-excel'
-        )
+        if len(st.session_state['table_extracts']) > 0:
+            excel_workbook = create_excel_binary_from_json(st.session_state['table_extracts'])
+            st.download_button(
+                label='Download Excel Output',
+                data=excel_workbook,
+                file_name='Converted_Tables.xlsx',
+                mime='application/vnd.ms-excel'
+            )
+        else:
+            st.write('No tables found in the PDF.')
