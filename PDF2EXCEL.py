@@ -172,6 +172,8 @@ def process_uploaded_pdf(client):
     uploaded_file = st.session_state['uploaded_pdf']
 
     if uploaded_file is not None:
+        st.session_state['file_name'] = uploaded_file.name
+
         with st.status('Scanning uploaded PDF pages ...', expanded=True) as status:
             # Convert PDF pages into images
             images = convert_from_bytes(uploaded_file.getvalue(), fmt='png', thread_count=8)
@@ -183,23 +185,32 @@ def process_uploaded_pdf(client):
             formatted_tables = []
             table_extracts = {}
             for i, image in enumerate(images):
-                status.write(f'Reading tables from page {i + 1} ...')
+                # Create an empty holder to show page level details
+                status.update(label=f'Processing page {i + 1} ...', expanded=True)
+                placeholder = st.empty()
 
                 # Convert to string using OCR
+                placeholder.write('Scanning page using OCR ...')
                 ocr_string = pytesseract.image_to_string(image)
 
                 # Use OpenAI to extract Markdown text content from image
+                placeholder.write('Transcribing content using AI vision ...')
                 text_from_image = extract_tables_from_image(client, image, ocr_string)
                 text_extracts.append(text_from_image)
 
                 # Format Markdown tables properly
+                placeholder.write('Extracting tables using AI ...')
                 formatted_table = format_markdown_tables(client, text_from_image, image)
                 formatted_tables.append(formatted_table)
 
                 # Use OpenAI to convert Markdown to JSON
                 if 'NO_TABLE_PRESENT' not in formatted_table:
+                    placeholder.write('Converting tables into Excel ...')
                     table_json = convert_markdown_to_json(client, formatted_table)
                     table_extracts[i+1] = table_json['tables']
+
+                # Empty placeholder at the end of processing each page
+                placeholder.empty()
 
             # Update status and session states
             status.update(label='✅ PDF processing complete', expanded=False)
@@ -207,20 +218,21 @@ def process_uploaded_pdf(client):
             st.session_state['formatted_tables'] = formatted_tables
             st.session_state['table_extracts'] = table_extracts
     else:
+        st.session_state.pop('file_name', None)
         st.session_state.pop('text_extracts', None)
         st.session_state.pop('formatted_tables', None)
         st.session_state.pop('table_extracts', None)
 
 
 if __name__ == '__main__':
-    st.title('Convert PDF Tables to Excel')
+    st.title('PDF ➡️ Excel')
 
     # Initialize OpenAI Client
     openai_client = OpenAI(api_key=st.secrets['OPENAI_API_KEY'])
 
     # Upload scanned PDF for processing
     uploaded_pdf = st.file_uploader(
-        f"Upload a PDF (of at most {st.secrets['PDF_PAGE_LIMIT']} pages) to convert to Excel",
+        f"Upload a PDF (of at most {st.secrets['PDF_PAGE_LIMIT']} pages) and convert its tables into an Excel file",
         type='pdf',
         on_change=process_uploaded_pdf,
         args=(openai_client,),
@@ -230,13 +242,37 @@ if __name__ == '__main__':
     # Show tables
     if 'table_extracts' in st.session_state:
         st.divider()
+
         if len(st.session_state['table_extracts']) > 0:
+            # Set file names
+            raw_file_name = st.session_state['file_name']
+            excel_file_name = raw_file_name[:raw_file_name.rfind('.')] + '.xlsx'
+            markdown_file_name = raw_file_name[:raw_file_name.rfind('.')] + '.md'
+
+            # Build Excel and Markdown outputs
             excel_workbook = create_excel_binary_from_json(st.session_state['table_extracts'])
+
+            # Articulate how users can use the product
+            download_description = """
+            In the Excel file below, you will find extracted tables from the uploaded PDF.
+            Optionally, you may also download the transcription in Markdown format too view AI's interim steps.
+            """
+            st.write(download_description)
+
+            # Add download buttons
             st.download_button(
-                label='Download Excel Output',
+                label='Download Excel',
                 data=excel_workbook,
-                file_name='Converted_Tables.xlsx',
-                mime='application/vnd.ms-excel'
+                file_name=excel_file_name,
+                mime='application/vnd.ms-excel',
+                type='primary'
+            )
+
+            st.download_button(
+                label='Download Transcription',
+                data='\n\n'.join(st.session_state['text_extracts']).encode('utf-8'),
+                file_name=markdown_file_name,
+                mime='text/markdown'
             )
         else:
-            st.write('No tables found in the PDF.')
+            st.write('No tables are found in the uploaded PDF.')
