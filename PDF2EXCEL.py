@@ -2,11 +2,11 @@ import base64
 import json
 from io import BytesIO
 
-import pytesseract
 import streamlit as st
 from openai import OpenAI
 from openpyxl import Workbook
 from pdf2image import convert_from_bytes
+from llama_parse import LlamaParse
 
 IMG2MD_SYSTEM_PROMPT = '''
 You are an expert document parser.
@@ -91,6 +91,15 @@ The JSON response should follow this format:
   ]
 }
 '''
+
+
+def read_files_using_llama_parse(f):
+    parser = LlamaParse(
+        api_key=st.secrets['LLAMA_CLOUD_API_KEY'],
+        result_type='markdown',
+        verbose=True
+    )
+    return parser.load_data(f, extra_info={'file_name': f.name})
 
 
 def encode_image(image):
@@ -180,6 +189,10 @@ def process_uploaded_pdf(client):
             images = images[:min(st.secrets['PDF_PAGE_LIMIT'], len(images))]  # limit pages for cost reasons
             st.session_state['images'] = images
 
+            # Read PDF using LlamaParse
+            status.update(label='Reading pages using LlamaParse ...', expanded=True)
+            parsed_documents = read_files_using_llama_parse(uploaded_file)
+
             # Extract table titles from images
             text_extracts = []
             formatted_tables = []
@@ -191,7 +204,7 @@ def process_uploaded_pdf(client):
 
                 # Convert to string using OCR
                 placeholder.write('Scanning page using OCR ...')
-                ocr_string = pytesseract.image_to_string(image)
+                ocr_string = parsed_documents[i].text
 
                 # Use OpenAI to extract Markdown text content from image
                 placeholder.write('Transcribing content using AI vision ...')
