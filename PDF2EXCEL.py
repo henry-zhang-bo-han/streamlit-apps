@@ -2,25 +2,26 @@ import base64
 import json
 from io import BytesIO
 
-import pytesseract
 import streamlit as st
+from llama_parse import LlamaParse
 from openai import OpenAI
 from openpyxl import Workbook
 from pdf2image import convert_from_bytes
 
 IMG2MD_SYSTEM_PROMPT = '''
 You are an expert document parser.
-Given the image of a document page, you transcribe all text of the page into Markdown format accurately and clearly.
+Your task is to transcribe the text from an image of a document page into Markdown format with precision and clarity.
 
 # Instructions 
-- Your transcription should include all the text in the image.
-- You should reference the text output from OCR to achieve higher accuracy.
+- Your transcription should include all the text from the image.
+- You should reference the text output from OCR for higher accuracy.
 - Your output should be formatted clearly, maintaining the original content structure shown in the image.
 
 # Output format
-- Transcribe the document word-for-word whenever possible. Do not paraphrase any content nor add clarifying statements.
+- Transcribe the document word-for-word without paraphrasing or adding clarifications.
 - Format all tables as Markdown tables.
-- Do not split a single integrated table into multiple tables, unless they are different tables.
+- Do not split a single integrated table into multiple tables, unless they are distinct.
+- Ensure table cell content aligns with the correct columns.
 - Do not split content into multiple lines unless ABSOLUTELY NECESSARY.
 - Output only the transcribed content. Do not reply with other content (e.g., here is the content of the document).
 - Do not wrap any content in code blocks.
@@ -37,19 +38,21 @@ FORMAT_TABLES_SYSTEM_PROMPT = '''
 You are an expert in formatting Markdown tables.
 
 # Instructions
-- You will be given an image of a document page containing zero or more tables.
+- You will receive an image of a document page containing zero or more tables.
 - You will also be provided with a raw Markdown text transcription of the document page.
+- Use the image to determine table structure and table layout, while use the transcription for content.
 - Your goal is to properly format all the tables in a Markdown format.
-- If there are no tables in the provided content, return NO_TABLE_PRESENT and terminate.
 
 # Output format
-- A single table should not be split into multiple tables, unless they are separate tables.
+- Do not split a single table into separate tables unless they are distinct.
 - Separate tables should have a clear space between them, typically more than space between two rows within same table.
 - Separate tables should have their own headings, titles, or descriptions.
-- Each Markdown table's row should have the same number of columns (i.e., max of all rows from that table).
-- If a cell spans multiple columns, represent it as a single cell with the appropriate number of dashes.
-- At the end of each table, add a new line with #####END-OF-TABLE#####.
-- Remove the page number and any other content irrelevant to the tables.
+- Each Markdown table's row should have the same number of columns, based on the row with the maximum columns.
+- If a table cell spans multiple columns, consider it occupies the leftmost column and leave the other columns empty.
+- At the end of each table, add a new line with `#####END-OF-TABLE#####`.
+- Remove page number and any other content irrelevant to the tables.
+
+If there are no tables in the provided content, return NO_TABLE_PRESENT and terminate.
 '''
 
 FORMAT_TABLES_USER_PROMPT = '''
@@ -64,16 +67,17 @@ MD2JSON_SYSTEM_PROMPT = '''
 You are an expert in converting Markdown tables into well-formatted JSON objects.
 
 # Instructions
-- If there are Markdown tables present in the content, focus on the Markdown tables only and ignore the rest.
+- You will be given the transcription of a document page in Markdown format.
+- If there are Markdown tables present in the content, focus solely on these tables and ignore the rest.
 - For each table, extract its title.
-- For each table, convert the Markdown table's body into a JSON list of rows.
+- Convert the content of each Markdown table (including headers and content) into a JSON list of rows.
 - Each row should be a list of cells, each representing the value of a table cell.
-- For each table row, retain the row header if present. Remove **bold** or any other formatting.
-- If a cell contains a number, make that cell an integer or float in the JSON object.
+- Retain row headers if present. Remove **bold** or any other formatting.
+- Convert cells containing numbers into integers or floats in the JSON object.
 '''
 
 MD2JSON_USER_PROMPT = '''
-For each table present, please return a JSON object that contains the title and body (a list of rows).
+For each table present, please return a JSON object that contains the title and content (a list of rows).
 Each row should be represented by a list of cells.
 ---
 The JSON response should follow this format:
@@ -81,7 +85,7 @@ The JSON response should follow this format:
   "tables": [
     {
       "title": <table-title>,
-      "body": [
+      "content": [
         [<cell-value>, <cell-value>, ..., <cell-value>],
         ...
         [<cell-value>, <cell-value>, ..., <cell-value>]
@@ -91,6 +95,15 @@ The JSON response should follow this format:
   ]
 }
 '''
+
+
+def read_files_using_llama_parse(f):
+    parser = LlamaParse(
+        api_key=st.secrets['LLAMA_CLOUD_API_KEY'],
+        result_type='markdown',
+        verbose=True
+    )
+    return parser.load_data(f, extra_info={'file_name': f.name})
 
 
 def encode_image(image):
@@ -131,7 +144,7 @@ def format_markdown_tables(client, markdown_content, image):
 
 
 def convert_markdown_to_json(client, markdown_content):
-    user_prompt = 'Here is the markdown content:\n' + markdown_content + '\n---\n' + MD2JSON_USER_PROMPT
+    user_prompt = 'Here is the markdown transcription:\n' + markdown_content + '\n---\n' + MD2JSON_USER_PROMPT
     messages = [
         {'role': 'system', 'content': MD2JSON_SYSTEM_PROMPT},
         {'role': 'user', 'content': user_prompt}
@@ -154,7 +167,7 @@ def create_excel_binary_from_json(json_data):
         for table in json_data[page]:
             ws.append([table['title']])
             ws.append([])
-            for row in table['body']:
+            for row in table['content']:
                 ws.append(row)
             ws.append([])
             ws.append([])
@@ -180,6 +193,10 @@ def process_uploaded_pdf(client):
             images = images[:min(st.secrets['PDF_PAGE_LIMIT'], len(images))]  # limit pages for cost reasons
             st.session_state['images'] = images
 
+            # Read PDF using LlamaParse
+            status.update(label='Reading pages using LlamaParse ...', expanded=True)
+            parsed_documents = read_files_using_llama_parse(uploaded_file)
+
             # Extract table titles from images
             text_extracts = []
             formatted_tables = []
@@ -191,7 +208,7 @@ def process_uploaded_pdf(client):
 
                 # Convert to string using OCR
                 placeholder.write('Scanning page using OCR ...')
-                ocr_string = pytesseract.image_to_string(image)
+                ocr_string = parsed_documents[i].text
 
                 # Use OpenAI to extract Markdown text content from image
                 placeholder.write('Transcribing content using AI vision ...')
@@ -207,7 +224,7 @@ def process_uploaded_pdf(client):
                 if 'NO_TABLE_PRESENT' not in formatted_table:
                     placeholder.write('Converting tables into Excel ...')
                     table_json = convert_markdown_to_json(client, formatted_table)
-                    table_extracts[i+1] = table_json['tables']
+                    table_extracts[i + 1] = table_json['tables']
 
                 # Empty placeholder at the end of processing each page
                 placeholder.empty()
