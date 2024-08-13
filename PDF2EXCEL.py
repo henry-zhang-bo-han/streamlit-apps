@@ -3,10 +3,10 @@ import json
 from io import BytesIO
 
 import streamlit as st
+from llama_parse import LlamaParse
 from openai import OpenAI
 from openpyxl import Workbook
 from pdf2image import convert_from_bytes
-from llama_parse import LlamaParse
 
 IMG2MD_SYSTEM_PROMPT = '''
 You are an expert document parser.
@@ -224,7 +224,7 @@ def process_uploaded_pdf(client):
                 if 'NO_TABLE_PRESENT' not in formatted_table:
                     placeholder.write('Converting tables into Excel ...')
                     table_json = convert_markdown_to_json(client, formatted_table)
-                    table_extracts[i+1] = table_json['tables']
+                    table_extracts[i + 1] = table_json['tables']
 
                 # Empty placeholder at the end of processing each page
                 placeholder.empty()
